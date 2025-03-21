@@ -1,4 +1,5 @@
 ﻿#include "token.h"
+#include <unordered_map>
 
 void enumerateProcessess();
 
@@ -36,7 +37,7 @@ int main(int argc, char* argv[])
 		hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pe32.th32ProcessID);
 		if (hProcess)
 		{
-			if (OpenProcessToken(hProcess, TOKEN_QUERY, &hToken))
+			if (OpenProcessToken(hProcess, TOKEN_QUERY | TOKEN_DUPLICATE, &hToken))
 			{
 				if (pid != 0)
 				{
@@ -46,7 +47,8 @@ int main(int argc, char* argv[])
 						getTokenInformation(hToken);
 						getTokenStatistics(hToken);
 						getTokenIntegrityLevel(hToken);
-						stealToken(pid);
+						getTokenElevationType(hToken);
+						stealToken(hToken);
 					}
 				}
 				else

